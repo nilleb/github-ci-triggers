@@ -1,0 +1,58 @@
+name: Unit tests and linters
+
+on:
+  push:
+
+jobs:
+  unit-tests-and-linters:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1 # required to find the current PR when the trigger is 'push'
+
+      - uses: jwalton/gh-find-current-pr@v1
+        id: currentPR
+
+      - run: |
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "PR_NUMBER=$PR_NUMBER"
+
+          curl --silent \
+            --show-error \
+            --request GET \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            --url https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER} > pr.json
+          cat pr.json
+
+          PR_DRAFT=$(jq -r '.draft' pr.json)
+          echo "PR_DRAFT=$PR_DRAFT" >> $GITHUB_OUTPUT
+          echo "PR_DRAFT=$PR_DRAFT"
+
+          curl --silent \
+            --show-error \
+            --request GET \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            --url https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews > reviews.json
+          cat reviews.json
+
+          approved=$(jq -r '.[] | select(.state=="APPROVED").state | length' reviews.json)
+          pr_approved=$([[ -z $approved ]] && echo "false" || echo "true")
+          echo "PR_APPROVED=${pr_approved}" >> $GITHUB_OUTPUT
+          echo "PR_APPROVED=${pr_approved}"
+          exit 0
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.currentPR.outputs.number }}
+
+      - run: |
+          echo "the pull request ${{ steps.pr.outputs.PR_NUMBER }} is not anymore in mode draft. Execute Unit tests and linters."
+          echo "if the unit tests are green, then transition the corresponding jira issue"
+          # python3 ./transition.py --server "${{ secrets.JIRA_SERVER }}" --email "${{ secrets.JIRA_ACCOUNT }}" --token "${{ secrets.JIRA_TOKEN }}" --timespent '2h' 'OC-43444' 'To Review'
+        if: steps.pr.outputs.PR_DRAFT == 'false'
+
+      - run: |
+          echo "the pull request ${{ steps.pr.outputs.PR_NUMBER }} is still in mode draft - don't merge, don't run the CI"
+          exit 1
+        if: steps.pr.outputs.PR_DRAFT == 'true'
